@@ -1,50 +1,50 @@
 package ipservice.zio
 
 import akka.actor.ActorSystem
-import com.typesafe.config.{Config, ConfigFactory}
-import io.circe.syntax.EncoderOps
 import ipservice.models.{IpInfo, IpPairSummary, IpPairSummaryRequest}
-import zhttp.http._
-import zhttp.service._
 import zio._
+import zio.http._
+import zio.http.api._
 
-final case class ZioHttpMicroservice(ipService: IpService) {
+final case class ZioHttpMicroservice(stupidService: StupidService, ipService: IpService) {
 
-  val app = Http.collectZIO[Request] {
-    case Method.GET -> !! / "ip" / ip =>
-      for {
-        info <- ipService.fetchIpInfo(ip)
-        response = info match {
-                     case Left(error) =>
-                       Response.text(error).setStatus(Status.BadRequest)
-                     case Right(info) =>
-                       Response.json(info.asJson.noSpaces)
-                   }
-      } yield response
+  val singleIp =
+    API
+      .get("ip" / In.string)
+      .output[IpInfo]
+      .handle { ip =>
+        ipService.fetchIpInfo(ip)
+      }
 
-    case req @ Method.POST -> !! / "ip" =>
-      for {
-        bodyString <- req.body.asString
-        summary    <- ZIO.fromEither(bodyString.asJson.as[IpPairSummaryRequest])
-        results    <- ipService.fetchIpInfo(summary.ip1).zipPar(ipService.fetchIpInfo(summary.ip2))
-        response = results match {
-                     case (Right(info1), Right(info2)) =>
-                       Response.json(IpPairSummary(info1, info2).asJson.noSpaces)
-                     case (Left(error), _) =>
-                       Response.text(error).setStatus(Status.BadRequest)
-                     case (_, Left(error)) =>
-                       Response.text(error).setStatus(Status.BadRequest)
-                   }
-      } yield response
-  }
+  val stupidApi =
+    API
+      .get("stupid")
+      .handle { _ =>
+        stupidService.duh
+      }
 
-  def start: ZIO[Any, Throwable, Nothing] =
-    Server.start(8080, app)
+  val ipDistance =
+    API
+      .post("ip")
+      .input[IpPairSummaryRequest]
+      .output[IpPairSummary]
+      .handle { request =>
+        for {
+          results <- ipService
+                       .fetchIpInfo(request.ip1)
+                       .zipPar(ipService.fetchIpInfo(request.ip2))
+        } yield IpPairSummary(results._1, results._2)
+      }
+
+  val app = (singleIp ++ ipDistance ++ stupidApi).toHttpApp
+
+  def start: URIO[Server, Nothing] =
+    Server.serve(app)
 }
 
 object ZioHttpMicroservice {
-  val live: ZLayer[IpService, Nothing, ZioHttpMicroservice] =
-    ZLayer.fromFunction(ZioHttpMicroservice(_))
+  val live =
+    ZLayer.fromFunction(ZioHttpMicroservice.apply _)
 }
 
 object ZioMain extends ZIOAppDefault {
@@ -58,9 +58,6 @@ object ZioMain extends ZIOAppDefault {
       }
     }
 
-  val configLayer: ULayer[Config] =
-    ZLayer.succeed(ConfigFactory.load())
-
   val run =
     ZIO
       .serviceWithZIO[ZioHttpMicroservice](_.start)
@@ -69,6 +66,8 @@ object ZioMain extends ZIOAppDefault {
         ZioHttpMicroservice.live,
         IpServiceAkka.layer,
         actorSystemLayer,
-        configLayer
+        StupidServiceLive.layer,
+        Configuration.layer,
+        Server.default
       )
 }

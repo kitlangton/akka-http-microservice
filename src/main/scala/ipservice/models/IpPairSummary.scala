@@ -2,6 +2,7 @@ package ipservice.models
 
 import io.circe._
 import io.circe.generic.semiauto._
+import zio.schema.{DeriveSchema, Schema}
 
 import scala.math._
 
@@ -29,4 +30,6 @@ object IpPairSummary {
 
   implicit val ipPairSummaryEncoder: Encoder[IpPairSummary] = deriveEncoder
   implicit val ipPairSummaryDecoder: Decoder[IpPairSummary] = deriveDecoder
+  implicit val schema: Schema[IpPairSummary]                = DeriveSchema.gen
+
 }

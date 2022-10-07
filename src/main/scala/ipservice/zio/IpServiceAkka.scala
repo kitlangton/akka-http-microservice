@@ -15,10 +15,10 @@ import zio._
 import java.io.IOException
 
 trait IpService {
-  def fetchIpInfo(ip: String): Task[Either[String, IpInfo]]
+  def fetchIpInfo(ip: String): Task[IpInfo]
 }
 
-final case class IpServiceAkka(config: Config, actorSystem: ActorSystem)
+final case class IpServiceAkka(config: IpServiceConfig, actorSystem: ActorSystem)
     extends IpService
     with ErrorAccumulatingCirceSupport {
 
@@ -26,10 +26,7 @@ final case class IpServiceAkka(config: Config, actorSystem: ActorSystem)
   implicit private val executor = actorSystem.dispatcher
 
   lazy val ipApiConnectionFlow: Flow[HttpRequest, HttpResponse, Any] =
-    AkkaHttp().outgoingConnection(
-      config.getString("services.ip-api.host"),
-      config.getInt("services.ip-api.port")
-    )
+    AkkaHttp().outgoingConnection(config.host, config.port)
 
   // Please note that using `Source.single(request).via(pool).runWith(Sink.head)` is considered anti-pattern. It's here only for the simplicity.
   // See why and how to improve it here: https://github.com/theiterators/akka-http-microservice/issues/32
@@ -38,11 +35,11 @@ final case class IpServiceAkka(config: Config, actorSystem: ActorSystem)
       Source.single(request).via(ipApiConnectionFlow).runWith(Sink.head)
     }
 
-  def fetchIpInfo(ip: String): IO[Throwable, Either[String, IpInfo]] =
+  def fetchIpInfo(ip: String): Task[IpInfo] =
     ipApiRequest(RequestBuilding.Get(s"/json/$ip")).flatMap { response =>
       response.status match {
-        case OK         => ZIO.fromFuture(_ => Unmarshal(response.entity).to[IpInfo].map(Right(_)))
-        case BadRequest => ZIO.succeed(Left(s"$ip: incorrect IP format"))
+        case OK         => ZIO.fromFuture(_ => Unmarshal(response.entity).to[IpInfo])
+        case BadRequest => ZIO.fail(new Error(s"$ip: incorrect IP format"))
         case _ =>
           ZIO.fromFuture(_ => Unmarshal(response.entity).to[String]).flatMap { entity =>
             val error = s"FreeGeoIP request failed with status code ${response.status} and entity $entity"
@@ -54,6 +51,5 @@ final case class IpServiceAkka(config: Config, actorSystem: ActorSystem)
 }
 
 object IpServiceAkka {
-  val layer: ZLayer[Config with ActorSystem, Nothing, IpService] =
-    ZLayer.fromFunction(IpServiceAkka(_, _))
+  val layer = ZLayer.fromFunction(IpServiceAkka.apply _)
 }
