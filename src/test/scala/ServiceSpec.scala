@@ -4,22 +4,30 @@ import akka.http.scaladsl.model.{HttpRequest, HttpResponse}
 import akka.http.scaladsl.model.StatusCodes._
 import akka.http.scaladsl.testkit.ScalatestRouteTest
 import akka.stream.scaladsl.Flow
+import de.heikoseeberger.akkahttpcirce.ErrorAccumulatingCirceSupport
+import ipservice.models.{IpInfo, IpPairSummary, IpPairSummaryRequest}
+import ipservice.Service
 import org.scalatest.flatspec.AsyncFlatSpec
 import org.scalatest.matchers.should.Matchers
 
-class ServiceSpec extends AsyncFlatSpec with Matchers with ScalatestRouteTest with Service with Protocols {
+class ServiceSpec
+    extends AsyncFlatSpec
+    with Matchers
+    with ScalatestRouteTest
+    with Service
+    with ErrorAccumulatingCirceSupport {
   override def testConfigSource = "akka.loglevel = WARNING"
-  override def config = testConfig
-  override val logger = NoLogging
+  override def config           = testConfig
+  override val logger           = NoLogging
 
-  val ip1Info = IpInfo("8.8.8.8", Option("United States"), Option("Mountain View"), Option(37.386), Option(-122.0838))
-  val ip2Info = IpInfo("8.8.4.4", Option("United States"), None, Option(38.0), Option(-97.0))
+  val ip1Info       = IpInfo("8.8.8.8", Option("United States"), Option("Mountain View"), Option(37.386), Option(-122.0838))
+  val ip2Info       = IpInfo("8.8.4.4", Option("United States"), None, Option(38.0), Option(-97.0))
   val ipPairSummary = IpPairSummary(ip1Info, ip2Info)
 
   override lazy val ipApiConnectionFlow = Flow[HttpRequest].map { request =>
     if (request.uri.toString().endsWith(ip1Info.query))
       HttpResponse(status = OK, entity = marshal(ip1Info))
-    else if(request.uri.toString().endsWith(ip2Info.query))
+    else if (request.uri.toString().endsWith(ip2Info.query))
       HttpResponse(status = OK, entity = marshal(ip2Info))
     else
       HttpResponse(status = BadRequest, entity = marshal("Bad ip format"))
